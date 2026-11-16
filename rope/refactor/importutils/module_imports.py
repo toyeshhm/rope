@@ -437,10 +437,40 @@ class _UnboundNameFinder(ast.RopeNodeVisitor):
             visitor.visit(child)
 
     def _FunctionDef(self, node):
+        self._visit_string_annotation(node.returns)
         self._visit_child_scope(node)
+
+    def _AsyncFunctionDef(self, node):
+        self._visit_string_annotation(node.returns)
+        self.generic_visit(node)
 
     def _ClassDef(self, node):
         self._visit_child_scope(node)
+
+    def _arg(self, node):
+        self._visit_string_annotation(node.annotation)
+        self.generic_visit(node)
+
+    def _AnnAssign(self, node):
+        self._visit_string_annotation(node.annotation)
+        self.generic_visit(node)
+
+    def _visit_string_annotation(self, node):
+        """Visit the names used by quoted annotations, e.g. ``var: "List[Baz]"``"""
+        if node is None or _is_literal_type(node):
+            return
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            for child in ast.iter_child_nodes(node):
+                self._visit_string_annotation(child)
+            return
+        try:
+            annotation = ast.parse(node.value, mode="eval").body
+        except SyntaxError:
+            return
+        for child in ast.walk(annotation):
+            child.lineno = node.lineno
+        self._visit_string_annotation(annotation)
+        self.visit(annotation)
 
     def _Name(self, node):
         if self._get_root()._is_node_interesting(node) and not self.is_bound(node.id):
@@ -517,6 +547,14 @@ class _LocalUnboundNameFinder(_UnboundNameFinder):
 
     def add_unbound(self, name):
         self.parent.add_unbound(name)
+
+
+def _is_literal_type(node):
+    """Whether `node` is ``Literal[...]``, whose strings are not annotations"""
+    if not isinstance(node, ast.Subscript):
+        return False
+    name = node.value
+    return getattr(name, "attr", getattr(name, "id", None)) == "Literal"
 
 
 class _GlobalImportFinder:

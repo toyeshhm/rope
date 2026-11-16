@@ -725,6 +725,56 @@ class ImportUtilsTest(unittest.TestCase):
             module_with_imports.get_changed_source(),
         )
 
+    def test_removing_unused_imports_and_string_annotations(self):
+        code = dedent("""\
+            from pkg1 import mod1
+            from pkg2 import mod2, mod3
+            import pkg2.mod3
+            from pkg3 import mod4, mod5, mod6
+
+
+            class C:
+                var: 'mod1' = 1
+
+            def a_func(arg: "list[mod2]") -> "pkg2.mod3":
+                pass
+
+            async def an_async_func(arg: "mod4") -> "list['mod5']":
+                pass
+        """)
+        self.mod.write(code)
+        pymod = self.project.get_module("mod")
+        module_with_imports = self.import_tools.module_imports(pymod)
+        module_with_imports.remove_unused_imports()
+        self.assertEqual(
+            code.replace("mod2, mod3", "mod2").replace(", mod6", ""),
+            module_with_imports.get_changed_source(),
+        )
+
+    def test_removing_unused_imports_and_strings_that_are_not_annotations(self):
+        self.mod.write(dedent("""\
+            from typing import Literal
+            from pkg1 import mod1
+            import pkg2
+
+
+            var: Literal["mod1"] = "mod1"
+            other: "not a (valid annotation" = "pkg2"
+        """))
+        pymod = self.project.get_module("mod")
+        module_with_imports = self.import_tools.module_imports(pymod)
+        module_with_imports.remove_unused_imports()
+        self.assertEqual(
+            dedent("""\
+                from typing import Literal
+
+
+                var: Literal["mod1"] = "mod1"
+                other: "not a (valid annotation" = "pkg2"
+            """),
+            module_with_imports.get_changed_source(),
+        )
+
     def test_removing_unused_imports_function_parameters(self):
         self.mod1.write(dedent("""\
             def func1():
